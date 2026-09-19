@@ -45,7 +45,8 @@ JetPack 7.2 로 올라오면서 Jetson 의 CUDA 가 **12.x → 13.2** 로 바뀌
 Jetpack-7-YOLO-11-Docker/
 ├── Dockerfile              # CUDA 13.2 베이스 + torch(cu130) + Ultralytics + TensorRT(선택)
 ├── src/
-│   └── usbcam_infer.py     # USB 카메라 실시간 추론 (X11 / MJPEG 웹스트림 / mp4 저장)
+│   ├── usbcam_infer.py     # USB 카메라 실시간 추론 (X11 / MJPEG 웹스트림 / mp4 저장)
+│   └── predict_image.py    # 사전학습 모델 단일 이미지 추론 (최소 예제)
 ├── scripts/
 │   └── run.sh              # 빌드·실행 헬퍼
 ├── docs/
@@ -144,6 +145,42 @@ docker run --rm -it --runtime nvidia --ipc=host --network host \
   yolo11-jp72:latest \
   python3 /workspace/usbcam_infer.py --device 0 --stream 8080 --mjpg --half
 ```
+
+### 단일 이미지 추론 (동작 확인용 최소 예제)
+
+카메라 없이 사전학습 모델이 제대로 도는지 먼저 확인할 때 씁니다.
+
+```bash
+# 인자 없이 실행하면 샘플 이미지를 자동으로 받아 추론합니다
+docker run --rm -it --runtime nvidia --ipc=host \
+  -v "$PWD/outputs:/workspace/outputs" \
+  yolo11-jp72:latest \
+  python3 /workspace/predict_image.py --out /workspace/outputs/result.jpg
+
+# 내 이미지로
+docker run --rm -it --runtime nvidia --ipc=host \
+  -v "$PWD/outputs:/workspace/outputs" -v "$PWD/images:/workspace/images" \
+  yolo11-jp72:latest \
+  python3 /workspace/predict_image.py /workspace/images/test.jpg \
+    --model yolo11s.pt --conf 0.4 --out /workspace/outputs/result.jpg
+```
+
+출력 예시
+
+```
+[INFO] torch 2.x.x / device = Orin
+[RESULT] 탐지 객체 5개  (전처리/추론/후처리 ms: 2.1 / 28.4 / 1.3)
+
+  #  class             conf   x1    y1    x2    y2
+--------------------------------------------------------
+  0  bus              0.941     18   231   800   768
+  1  person           0.878    669   392   810   878
+...
+[INFO] 결과 이미지 저장: /workspace/outputs/result.jpg
+```
+
+GPU가 잡히지 않으면 자동으로 CPU로 넘어가므로, `device = CPU` 로 찍히면 8절의
+`torch.cuda.is_available() == False` 항목을 먼저 확인하세요.
 
 ### 주요 옵션
 
