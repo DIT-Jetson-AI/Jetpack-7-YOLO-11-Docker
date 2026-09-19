@@ -1,5 +1,5 @@
-# 모델 가중치 / 결과물
-models/
+# 입력·결과물
+images/
 outputs/
 *.pt
 *.onnx

@@ -45,9 +45,9 @@ JetPack 7.2 로 올라오면서 Jetson 의 CUDA 가 **12.x → 13.2** 로 바뀌
 Jetpack-7-YOLO-11-Docker/
 ├── Dockerfile              # CUDA 13.2 베이스 + torch(cu130) + Ultralytics + TensorRT(선택)
 ├── src/
-│   ├── usbcam_infer.py     # USB 카메라 실시간 추론 (X11 / MJPEG 웹스트림 / mp4 저장)
-│   ├── predict_image.py    # 사전학습 모델 단일 이미지 추론 (최소 예제)
-│   └── predict_batch.py    # 이미지/폴더/동영상 배치 추론 + detect·segment·pose
+│   ├── predict_image.py    # 이미지 1장 추론        (35줄)
+│   ├── predict_batch.py    # 폴더·동영상 일괄 추론  (55줄)
+│   └── usbcam_infer.py     # USB 카메라 실시간 추론 (66줄)
 ├── scripts/
 │   └── run.sh              # 빌드·실행 헬퍼
 ├── docs/
@@ -90,7 +90,7 @@ v4l2-ctl -d /dev/video0 --list-formats-ext    # MJPG 지원 여부 확인
 git clone https://github.com/DIT-Jetson-AI/Jetpack-7-YOLO-11-Docker.git
 cd Jetpack-7-YOLO-11-Docker
 chmod +x scripts/run.sh
-mkdir -p models outputs
+mkdir -p images outputs
 
 ./scripts/run.sh build        # TensorRT 포함 (엔진 변환까지 컨테이너 내부에서)
 # 또는
@@ -114,137 +114,73 @@ mkdir -p models outputs
 아래 두 가지가 확인되면 정상입니다.
 
 ```
-torch 2.x.x cuda True Orin        ← GPU 인식
-/dev/video0 ...                   ← 카메라 인식
+GPU: True          ← GPU 인식 (False면 8절 참고)
+/dev/video0 ...    ← 카메라 인식
 ```
 
 ---
 
 ## 제6절. 실행
 
-```bash
-# (A) 헤드리스 — 다른 PC 브라우저에서 http://<jetson-ip>:8080
-./scripts/run.sh stream
+세 가지 스크립트가 전부이고, 각각 한 가지 일만 합니다.
 
-# (B) Jetson 에 모니터가 연결된 경우 — X11 창
-./scripts/run.sh view
+| 스크립트 | 하는 일 |
+|---|---|
+| `predict_image.py` | 이미지 1장 — 동작 확인용 |
+| `predict_batch.py` | 폴더·동영상 일괄 — 결과를 `results.csv` 로 |
+| `usbcam_infer.py` | USB 카메라 실시간 — 화면 표시 + mp4 저장 |
 
-# (C) TensorRT 엔진 변환 후 추론 (최초 1회 수 분 소요)
-./scripts/run.sh engine
-
-# (D) 컨테이너 셸 진입
-./scripts/run.sh shell
-```
-
-docker 명령을 직접 쓰는 경우:
+헬퍼 스크립트로 실행하는 것이 가장 간단합니다.
 
 ```bash
-docker run --rm -it --runtime nvidia --ipc=host --network host \
-  --device /dev/video0 \
-  -v "$PWD/models:/workspace/models" \
-  -v "$PWD/outputs:/workspace/outputs" \
-  yolo11-jp72:latest \
-  python3 /workspace/usbcam_infer.py --device 0 --stream 8080 --mjpg --half
+./scripts/run.sh image      # 샘플 이미지 1장 (인터넷에서 자동으로 받아옴)
+./scripts/run.sh batch      # images/ 폴더 전부
+./scripts/run.sh camera     # USB 카메라
+./scripts/run.sh shell      # 컨테이너 셸
 ```
 
-### 단일 이미지 추론 (동작 확인용 최소 예제)
+`images/` 와 `outputs/` 폴더가 컨테이너 안으로 연결되므로, 넣을 파일은 `images/` 에 두고
+결과는 `outputs/` 에서 확인하시면 됩니다.
 
-카메라 없이 사전학습 모델이 제대로 도는지 먼저 확인할 때 씁니다.
+### 직접 실행
 
 ```bash
-# 인자 없이 실행하면 샘플 이미지를 자동으로 받아 추론합니다
-docker run --rm -it --runtime nvidia --ipc=host \
-  -v "$PWD/outputs:/workspace/outputs" \
-  yolo11-jp72:latest \
-  python3 /workspace/predict_image.py --out /workspace/outputs/result.jpg
-
-# 내 이미지로
-docker run --rm -it --runtime nvidia --ipc=host \
-  -v "$PWD/outputs:/workspace/outputs" -v "$PWD/images:/workspace/images" \
-  yolo11-jp72:latest \
-  python3 /workspace/predict_image.py /workspace/images/test.jpg \
-    --model yolo11s.pt --conf 0.4 --out /workspace/outputs/result.jpg
-```
-
-출력 예시
-
-```
-[INFO] torch 2.x.x / device = Orin
-[RESULT] 탐지 객체 5개  (전처리/추론/후처리 ms: 2.1 / 28.4 / 1.3)
-
-  #  class             conf   x1    y1    x2    y2
---------------------------------------------------------
-  0  bus              0.941     18   231   800   768
-  1  person           0.878    669   392   810   878
-...
-[INFO] 결과 이미지 저장: /workspace/outputs/result.jpg
-```
-
-GPU가 잡히지 않으면 자동으로 CPU로 넘어가므로, `device = CPU` 로 찍히면 8절의
-`torch.cuda.is_available() == False` 항목을 먼저 확인하세요.
-
-### 배치 추론 (이미지 / 폴더 / 동영상)
-
-결과를 파일로 남겨 나중에 집계해야 할 때 씁니다. 탐지 결과가 `results.csv` / `results.json` 으로
-떨어지고, 박스가 그려진 이미지·영상은 `annotated/` 에 저장됩니다.
-
-```bash
-# 폴더 안 이미지 전부
 docker run --rm -it --runtime nvidia --ipc=host \
   -v "$PWD/images:/workspace/images" -v "$PWD/outputs:/workspace/outputs" \
-  yolo11-jp72:latest \
-  python3 /workspace/predict_batch.py /workspace/images --out /workspace/outputs
-
-# 동영상 (2프레임마다 1장씩)
-docker run --rm -it --runtime nvidia --ipc=host \
-  -v "$PWD/videos:/workspace/videos" -v "$PWD/outputs:/workspace/outputs" \
-  yolo11-jp72:latest \
-  python3 /workspace/predict_batch.py /workspace/videos/test.mp4 \
-    --out /workspace/outputs --stride 2 --half
+  -w /workspace/outputs yolo11-jp72:latest \
+  python3 /workspace/predict_batch.py /workspace/images
 ```
 
-모델 종류는 가중치 이름으로 자동 판별됩니다.
+### 인자
 
-| 가중치 | task | 추가로 기록되는 값 |
-|---|---|---|
-| `yolo11n.pt` | detect | 박스 좌표·클래스·신뢰도 |
-| `yolo11n-seg.pt` | segment | `mask_area_px` (마스크 픽셀 면적) |
-| `yolo11n-pose.pt` | pose | `keypoints` (관절 17개의 x·y·conf) |
-| `yolo11n-obb.pt` | obb | 회전 박스 |
+옵션 파싱을 걷어내고 위치 인자 두 개만 받습니다. 순서는 **입력, 모델** 입니다.
 
-배치 추론 전용 옵션
+```bash
+python3 predict_image.py my.jpg yolo11s.pt
+python3 predict_batch.py /workspace/images yolo11n-seg.pt
+python3 usbcam_infer.py  0 yolo11n.pt          # 0 = /dev/video0
+```
 
-| 옵션 | 설명 |
+모델은 이름만 바꾸면 종류가 바뀌고, 없으면 자동으로 내려받습니다.
+
+| 가중치 | 결과 |
 |---|---|
-| `--stride 2` | 동영상에서 N프레임마다 1장만 처리 (속도 확보) |
-| `--classes 0,2` | 특정 클래스만 (0=person, 2=car …) |
-| `--iou 0.7` | NMS IoU 임계값 |
-| `--no-save-image` | 결과 이미지 저장 생략, CSV/JSON만 |
+| `yolo11n.pt` / `s` / `m` / `l` / `x` | 객체 탐지 (뒤로 갈수록 정확하지만 느림) |
+| `yolo11n-seg.pt` | 세그멘테이션 (픽셀 단위 윤곽) |
+| `yolo11n-pose.pt` | 포즈 (사람 관절 17개) |
+| `yolo11n-obb.pt` | 회전 박스 |
 
-`results.csv` 는 Excel에서 바로 열리도록 UTF-8 BOM으로 저장되며, 키포인트처럼 중첩된 값은
-CSV에서 빠지고 `results.json` 에만 들어갑니다.
+임계값·해상도처럼 자주 건드리지 않는 값은 스크립트 안에 그대로 적혀 있으니, 필요하면
+`model.predict(...)` 줄에 `conf=0.4` 같은 인자를 직접 넣으시면 됩니다.
 
-### 주요 옵션
+```python
+result = model.predict(image, save=True, conf=0.4, imgsz=960)
+```
 
-| 옵션 | 설명 |
-|---|---|
-| `--model /workspace/models/yolo11s.pt` | 모델 교체 (커스텀 가중치 포함) |
-| `--imgsz 640` | 입력 해상도. 320 으로 낮추면 FPS 크게 상승 |
-| `--conf 0.25` | 신뢰도 임계값 |
-| `--mjpg` | 카메라 MJPG 모드 강제 — 720p 이상에서 FPS 확보 |
-| `--half` | FP16 추론 |
-| `--engine` | TensorRT 엔진 자동 변환 후 사용 |
-| `--stream 8080` | MJPEG 웹 스트림 |
-| `--view` | X11 창 표시 |
-| `--save /workspace/outputs/rec.mp4` | 결과 영상 저장 |
+### 모니터가 없을 때
 
-### 환경변수
-
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `IMAGE` | `yolo11-jp72:latest` | 이미지 태그 |
-| `CAM` | `/dev/video0` | 카메라 장치 |
-| `PORT` | `8080` | 스트림 포트 |
+`usbcam_infer.py` 상단의 `SHOW = True` 를 `False` 로 바꾸면 창을 띄우지 않고
+`usbcam_out.mp4` 로만 저장합니다.
 
 ---
 
@@ -252,14 +188,18 @@ CSV에서 빠지고 `results.json` 에만 들어갑니다.
 
 Orin Nano 8GB / 640px / MAXN_SUPER 기준 대략치입니다.
 
-| 실행 방식 | 예상 FPS |
+| 모델 | 예상 FPS |
 |---|---|
-| PyTorch FP32 | 15 ~ 25 |
-| PyTorch FP16 (`--half`) | 25 ~ 35 |
-| TensorRT FP16 (`--engine`) | 45 ~ 60 |
+| `yolo11n.pt` | 15 ~ 25 |
+| `yolo11s.pt` | 10 ~ 15 |
 
-실측치는 전원 모드·카메라 포맷·모델 크기에 따라 달라집니다.
-카메라가 YUYV 로만 동작하면 USB 대역폭 한계로 720p 에서 5~10 FPS 에 묶이므로 `--mjpg` 를 반드시 사용하세요.
+실측치는 전원 모드·카메라 포맷·모델 크기에 따라 달라집니다. 더 빠르게 하려면
+`model.predict(...)` 에 `half=True` 를 넣거나(FP16), `imgsz=320` 으로 해상도를 낮추세요.
+TensorRT 엔진(`model.export(format="engine")`)까지 쓰면 2~3배까지 올라가지만, 코드가
+복잡해지므로 이 레포에서는 빼두었습니다.
+
+카메라 영상이 끊긴다면 `usbcam_infer.py` 의 MJPG 설정을 확인하세요. 무압축(YUYV)으로
+동작하면 USB 대역폭 한계로 720p 에서 5~10 FPS 에 묶입니다.
 
 ---
 
@@ -274,15 +214,17 @@ Orin Nano 8GB / 640px / MAXN_SUPER 기준 대략치입니다.
 | 카메라를 열 수 없음 | `--device /dev/video0` 누락, 또는 장치 번호가 다름 |
 | X11 창이 뜨지 않음 | 호스트에서 `xhost +local:docker`, `DISPLAY` 확인 |
 | 빌드 중 Jetson APT 저장소 실패 | `--build-arg USE_TENSORRT=0` 으로 슬림 빌드 |
-| 엔진 변환 중 OOM | swap 8~16GB 확대 후 재시도, 또는 `--imgsz 480` |
+| 메모리 부족 | swap 8~16GB 확대, 또는 헤드리스 부팅으로 1GB 이상 확보 |
 
 ---
 
 ## 제9절. 주의사항
 
+- 세 스크립트는 **읽고 고치기 쉬운 것**을 최우선으로 두었습니다. 옵션 파싱과 예외 처리를
+  덜어냈으므로, 필요한 기능은 `model.predict(...)` 인자에 직접 추가해서 쓰시면 됩니다.
 - **TensorRT 엔진(.engine) 은 장치·버전 종속적입니다.** 다른 Jetson 이나 다른 JetPack 버전으로
   파일을 그대로 옮기면 동작하지 않습니다. 배포 대상 보드마다 각각 변환하세요.
-- `models/`, `outputs/` 디렉터리는 git 추적 대상에서 제외되어 있습니다.
+- `images/`, `outputs/` 디렉터리는 git 추적 대상에서 제외되어 있습니다.
 - 본 구성은 **추론(inference)** 을 전제로 합니다. 학습은 Orin Nano 에서도 가능하나 실용적이지 않습니다.
 
 ---
