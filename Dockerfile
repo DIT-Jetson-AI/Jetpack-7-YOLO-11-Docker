@@ -66,6 +66,7 @@ RUN wget -q -O /workspace/models/${PREFETCH_MODEL} \
 
 COPY src/usbcam_infer.py /workspace/usbcam_infer.py
 COPY src/predict_image.py /workspace/predict_image.py
+COPY src/predict_batch.py /workspace/predict_batch.py
 
 ENV ULTRALYTICS_WEIGHTS=/workspace/models/yolo11n.pt
 CMD ["python3", "/workspace/usbcam_infer.py", "--help"]

@@ -46,7 +46,8 @@ Jetpack-7-YOLO-11-Docker/
 ├── Dockerfile              # CUDA 13.2 베이스 + torch(cu130) + Ultralytics + TensorRT(선택)
 ├── src/
 │   ├── usbcam_infer.py     # USB 카메라 실시간 추론 (X11 / MJPEG 웹스트림 / mp4 저장)
-│   └── predict_image.py    # 사전학습 모델 단일 이미지 추론 (최소 예제)
+│   ├── predict_image.py    # 사전학습 모델 단일 이미지 추론 (최소 예제)
+│   └── predict_batch.py    # 이미지/폴더/동영상 배치 추론 + detect·segment·pose
 ├── scripts/
 │   └── run.sh              # 빌드·실행 헬퍼
 ├── docs/
@@ -181,6 +182,47 @@ docker run --rm -it --runtime nvidia --ipc=host \
 
 GPU가 잡히지 않으면 자동으로 CPU로 넘어가므로, `device = CPU` 로 찍히면 8절의
 `torch.cuda.is_available() == False` 항목을 먼저 확인하세요.
+
+### 배치 추론 (이미지 / 폴더 / 동영상)
+
+결과를 파일로 남겨 나중에 집계해야 할 때 씁니다. 탐지 결과가 `results.csv` / `results.json` 으로
+떨어지고, 박스가 그려진 이미지·영상은 `annotated/` 에 저장됩니다.
+
+```bash
+# 폴더 안 이미지 전부
+docker run --rm -it --runtime nvidia --ipc=host \
+  -v "$PWD/images:/workspace/images" -v "$PWD/outputs:/workspace/outputs" \
+  yolo11-jp72:latest \
+  python3 /workspace/predict_batch.py /workspace/images --out /workspace/outputs
+
+# 동영상 (2프레임마다 1장씩)
+docker run --rm -it --runtime nvidia --ipc=host \
+  -v "$PWD/videos:/workspace/videos" -v "$PWD/outputs:/workspace/outputs" \
+  yolo11-jp72:latest \
+  python3 /workspace/predict_batch.py /workspace/videos/test.mp4 \
+    --out /workspace/outputs --stride 2 --half
+```
+
+모델 종류는 가중치 이름으로 자동 판별됩니다.
+
+| 가중치 | task | 추가로 기록되는 값 |
+|---|---|---|
+| `yolo11n.pt` | detect | 박스 좌표·클래스·신뢰도 |
+| `yolo11n-seg.pt` | segment | `mask_area_px` (마스크 픽셀 면적) |
+| `yolo11n-pose.pt` | pose | `keypoints` (관절 17개의 x·y·conf) |
+| `yolo11n-obb.pt` | obb | 회전 박스 |
+
+배치 추론 전용 옵션
+
+| 옵션 | 설명 |
+|---|---|
+| `--stride 2` | 동영상에서 N프레임마다 1장만 처리 (속도 확보) |
+| `--classes 0,2` | 특정 클래스만 (0=person, 2=car …) |
+| `--iou 0.7` | NMS IoU 임계값 |
+| `--no-save-image` | 결과 이미지 저장 생략, CSV/JSON만 |
+
+`results.csv` 는 Excel에서 바로 열리도록 UTF-8 BOM으로 저장되며, 키포인트처럼 중첩된 값은
+CSV에서 빠지고 `results.json` 에만 들어갑니다.
 
 ### 주요 옵션
 
