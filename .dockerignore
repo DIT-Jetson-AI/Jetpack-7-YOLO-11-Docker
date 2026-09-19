@@ -1,0 +1,11 @@
+.git
+.gitignore
+docs/
+models/
+outputs/
+__pycache__/
+*.pt
+*.onnx
+*.engine
+*.mp4
+*.md

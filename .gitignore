@@ -1,0 +1,18 @@
+# 모델 가중치 / 결과물
+models/
+outputs/
+*.pt
+*.onnx
+*.engine
+*.mp4
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 기타
+.DS_Store
+*.log
+.yolo/
