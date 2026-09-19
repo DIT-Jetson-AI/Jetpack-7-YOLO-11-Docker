@@ -36,7 +36,8 @@ docker run --rm yolo11-jp72:latest python3 -c "import torch; print(torch.__versi
 ### PyTorch 결과가 NaN 으로 나옴
 
 SBSA 휠의 sm_87 커널 커버리지 문제가 보고된 바 있습니다.
-YOLO11 추론에서는 대체로 재현되지 않지만, 의심되면 TensorRT 경로(`--engine`)로 전환하세요.
+YOLO11 추론에서는 대체로 재현되지 않지만, 의심되면 TensorRT 엔진으로 변환해 쓰는 쪽을 검토하세요
+(`model.export(format="engine")`).
 
 ---
 
@@ -63,12 +64,12 @@ docker run ... --device /dev/video0 ...
 v4l2-ctl -d /dev/video0 --list-formats-ext | grep -A3 MJPG
 ```
 
-MJPG 를 지원하면 `--mjpg` 옵션을 붙이고, 지원하지 않으면 해상도를 낮추세요(`--width 640 --height 480`).
+`usbcam_infer.py` 는 기본적으로 MJPG 로 요청합니다. 카메라가 MJPG 를 지원하지 않으면
+스크립트 상단의 해상도를 640x480 으로 낮추세요.
 
 ### 화면 지연(latency) 이 큼
 
-`--imgsz` 를 낮추거나(`320`), `--engine` 으로 전환합니다.
-스크립트는 `CAP_PROP_BUFFERSIZE=1` 로 버퍼를 최소화해 두었습니다.
+`model.predict(frame, verbose=False, imgsz=320)` 처럼 해상도를 낮추거나, 더 작은 모델을 쓰세요.
 
 ---
 
@@ -82,7 +83,8 @@ echo $DISPLAY            # 보통 :0
 docker run ... -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix ...
 ```
 
-SSH 접속 중이라면 X11 forwarding 대신 `--stream` (MJPEG) 을 쓰는 편이 훨씬 안정적입니다.
+SSH 접속 중이라면 `usbcam_infer.py` 의 `SHOW = False` 로 두고, 저장된 `usbcam_out.mp4` 를
+내려받아 확인하는 편이 안정적입니다.
 
 ### 브라우저에서 스트림이 안 보임
 
@@ -127,7 +129,7 @@ df -h
 ```bash
 # swap 확대 후 재시도 (docs/setup.md 4절)
 # 또는 해상도를 낮춰 변환
-python3 /workspace/usbcam_infer.py --engine --imgsz 480
+python3 -c "from ultralytics import YOLO; YOLO('yolo11n.pt').export(format='engine', imgsz=480)"
 ```
 
 변환은 최초 1회만 수행되며, 결과 `.engine` 파일은 `models/` 에 남습니다(볼륨 마운트 기준).
